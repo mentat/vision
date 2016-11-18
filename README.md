@@ -26,13 +26,13 @@ daemon configuration.
         })
 
     // Configure all of the services
-    err := infra.SetConfigurationByTag(
+    err := infra.UpdateConfigurationByTag(
         "nginx",
         map[string]interface{}{
             "http.bind.port": 80
         })
 
     // Run a command on a nodeId
-    err := infra.RunCommand(service[0].ID, "backup", map[string]interface{}{
+    err := infra.RunCommand(service[0].NodeID, "backup", map[string]interface{}{
         "backup_id":"XYZ123"
     })
