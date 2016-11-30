@@ -36,3 +36,6 @@ daemon configuration.
     err := infra.RunCommand(service[0].NodeID, "backup", map[string]interface{}{
         "backup_id":"XYZ123"
     })
+
+
+    
