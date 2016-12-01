@@ -1,7 +1,9 @@
 package vision
 
 import (
+	"flag"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -25,7 +27,13 @@ func runContainer(name string) (cloudlayer.CloudLayer, string, error) {
 		return nil, "", err
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	for {
+		if _, err := NewInfra("local"); err != nil {
+			time.Sleep(50 * time.Millisecond)
+		} else {
+			break
+		}
+	}
 
 	return layer, inst.ID, nil
 }
@@ -37,26 +45,38 @@ func stopContainer(layer cloudlayer.CloudLayer, id string) {
 	}
 }
 
+func TestMain(m *testing.M) {
+	flag.Parse()
+	layer, id, err := runContainer("consul")
+
+	if err != nil {
+		fmt.Printf("Cannot start consul service: %s", err.Error())
+		os.Exit(1)
+	} else {
+		retval := m.Run()
+		stopContainer(layer, id)
+		os.Exit(retval)
+	}
+}
+
 func TestKV(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping test in short mode.")
 	}
-	layer, id, err := runContainer("consul")
-
-	if err != nil {
-		t.Fatalf(err.Error())
-	} else {
-		defer stopContainer(layer, id)
-	}
 
 	infra, err := NewInfra("local")
 	if err != nil {
-		t.Fatalf("Could not connect to Consul.")
+		t.Fatalf("Could not connect to Consul: %s", err)
 	}
-	infra.SetValue("foo", "bar")
+
+	err = infra.SetValue("foo", "bar")
+	if err != nil {
+		t.Fatalf("Could not set value to Consul: %s", err)
+	}
+
 	v, err := infra.GetValue("foo")
 	if err != nil {
-		t.Fatalf("Could not get value from Consul.")
+		t.Fatalf("Could not get value from Consul: %s", err)
 	}
 
 	if v != "bar" {
@@ -64,7 +84,7 @@ func TestKV(t *testing.T) {
 	}
 }
 
-func _TestServices(t *testing.T) {
+func TestServices(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode.")
 	}
@@ -73,17 +93,18 @@ func _TestServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not connect to Consul.")
 	}
-	infra.SetValue("foo", "bar")
-	v, err := infra.GetValue("foo")
+
+	services, err := infra.GetServiceByName("consul")
 	if err != nil {
-		t.Fatalf("Could not get value from Consul.")
+		t.Fatalf("Could not list services.")
 	}
-	if v != "bar" {
-		t.Fatalf("Consul value is invalid.")
+	if len(services) == 0 {
+		t.Fatalf("No services found in Consul.")
 	}
+
 }
 
-func _TestWatch(t *testing.T) {
+func TestNodes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode.")
 	}
@@ -92,12 +113,54 @@ func _TestWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not connect to Consul.")
 	}
-	infra.SetValue("foo", "bar")
-	v, err := infra.GetValue("foo")
+
+	services, err := infra.GetServiceByName("consul")
 	if err != nil {
-		t.Fatalf("Could not get value from Consul.")
+		t.Fatalf("Could not list services.")
 	}
-	if v != "bar" {
-		t.Fatalf("Consul value is invalid.")
+
+	if len(services) == 0 {
+		t.Fatalf("No services found in Consul.")
 	}
+
+	fmt.Printf("%v\n", services)
+	node, err := infra.GetNode(services[0].NodeID)
+	if err != nil {
+		t.Fatalf("Could not get node: %s", services[0].NodeID)
+	}
+
+	fmt.Printf("%v\n", node)
+
+}
+
+func TestWatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
+
+	infra, err := NewInfra("local")
+	if err != nil {
+		t.Fatalf("Could not connect to Consul.")
+	}
+	done := make(chan bool, 1)
+
+	events := infra.WatchKeys("foo/", done)
+
+	infra.SetValue("foo/bar", "bar1")
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; event.Value != "bar1" {
+		t.Fatalf("Event equals: %s", event.Value)
+	}
+	infra.SetValue("foo/bat", "bar2")
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; event.Value != "bar2" {
+		t.Fatalf("Event equals: %s", event.Value)
+	}
+	infra.SetValue("foo/bas", "bar3")
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; event.Value != "bar3" {
+		t.Fatalf("Event equals: %s", event.Value)
+	}
+
+	done <- true
 }
