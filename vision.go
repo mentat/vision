@@ -11,46 +11,88 @@ import (
 
 var logger = loggo.GetLogger("vision")
 
+// KeyPair - a key/value pair.
+type KeyPair struct {
+	Key   string
+	Value string
+}
+
 // Service - a service on a VisionNode (like nginx, mysql, etc.)
 type Service struct {
-	ID            string
-	Name          string
-	NodeID        string
-	Health        string
-	Address       string
-	TaggedAddress map[string]string
-	Port          int
-	CreatedAt     *time.Time
-	Configuration map[string]interface{}
-	Tags          []string
+	ID              string
+	Name            string
+	NodeID          string
+	Health          string
+	Address         string
+	TaggedAddresses map[string]string
+	Port            int
+	CreatedAt       *time.Time
+	Configuration   map[string]interface{}
+	Tags            []string
 }
 
 // Node - a node in an infra.
 type Node struct {
+	Node            string
+	Zone            string
+	Health          string
+	Address         string
+	TaggedAddresses map[string]string
+	CreatedAt       *time.Time
+	Services        []*Service
+}
+
+// NodeEvent - an event related to a node.
+type NodeEvent struct {
+	ID              string
+	Address         string
+	TaggedAddresses map[string]string
+}
+
+// CheckEvent - a health check event.
+type CheckEvent struct {
+	Node        string
+	CheckID     string
+	Name        string
+	Status      string
+	Notes       string
+	Output      string
+	ServiceID   string
+	ServiceName string
+}
+
+// ServiceEvent - A Service Event.
+type ServiceEvent struct {
+	ID                string
+	Name              string
+	Tags              []string
+	Port              int
+	Address           string
+	EnableTagOverride bool
+	Node              NodeEvent
+}
+
+// UserEvent - A custom event type.
+type UserEvent struct {
 	ID            string
-	Zone          string
-	Health        string
-	Address       string
-	TaggedAddress map[string]string
-	CreatedAt     *time.Time
-	Services      []*Service
+	Name          string
+	Payload       []byte
+	NodeFilter    string
+	ServiceFilter string
+	TagFilter     string
+	Version       int
+	LTime         uint64
 }
 
 // Event - an asyncronous event received via a watch.
 type Event struct {
-	Type          string
-	ServiceName   string
-	ServiceID     string
-	Address       string
-	Tags          []string
-	Port          int
-	CheckID       string
-	Node          string
-	Message       string
-	Status        string
-	Key           string
-	Value         string
-	TaggedAddress map[string]string
+	Type string
+
+	Check     *CheckEvent
+	Node      *NodeEvent
+	Service   *ServiceEvent
+	UserEvent *UserEvent
+	KV        *KeyPair
 }
 
 type consulServer struct {
@@ -135,13 +177,28 @@ func (infra Infra) GetNode(nodeID string) (*Node, error) {
 	}
 
 	ret := &Node{
-		ID:            nodeID,
-		Address:       node.Node.Address,
-		TaggedAddress: node.Node.TaggedAddresses,
-		Services:      services,
+		Node:            nodeID,
+		Address:         node.Node.Address,
+		TaggedAddresses: node.Node.TaggedAddresses,
+		Services:        services,
 	}
 
 	return ret, nil
+}
+
+// FireEvent - fire a custom event into the cluster.
+func (infra Infra) FireEvent(event *UserEvent) error {
+	e := infra.consulClient.Event()
+	params := &api.UserEvent{
+		Name:    event.Name,
+		Payload: event.Payload,
+	}
+
+	if _, _, err := e.Fire(params, nil); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SetValue -
@@ -192,16 +249,16 @@ func (infra Infra) GetServiceByTag(name, tag string) ([]*Service, error) {
 	retVal := make([]*Service, len(services))
 	for i, s := range services {
 		service := &Service{
-			ID:            s.ServiceID,
-			NodeID:        s.Node,
-			Health:        "",
-			Address:       s.Address,
-			TaggedAddress: s.TaggedAddresses,
-			Name:          s.ServiceName,
-			Port:          s.ServicePort,
-			CreatedAt:     nil,
-			Configuration: nil,
-			Tags:          s.ServiceTags,
+			ID:              s.ServiceID,
+			NodeID:          s.Node,
+			Health:          "",
+			Address:         s.Address,
+			TaggedAddresses: s.TaggedAddresses,
+			Name:            s.ServiceName,
+			Port:            s.ServicePort,
+			CreatedAt:       nil,
+			Configuration:   nil,
+			Tags:            s.ServiceTags,
 		}
 		retVal[i] = service
 	}
@@ -232,20 +289,23 @@ func (infra Infra) decodeCheck(kind string, checks []*api.HealthCheck, out chan 
 	for _, val := range checks {
 
 		event := Event{
-			Type:        kind,
-			Status:      val.Status,
-			ServiceName: val.ServiceName,
-			ServiceID:   val.ServiceID,
-			CheckID:     val.CheckID,
-			Node:        val.Node,
-			Message:     val.Output,
+			Type: kind,
+			Check: &CheckEvent{
+				Status:      val.Status,
+				ServiceName: val.ServiceName,
+				ServiceID:   val.ServiceID,
+				CheckID:     val.CheckID,
+				Node:        val.Node,
+				Output:      val.Output,
+				Notes:       val.Notes,
+			},
 		}
 		out <- event
 	}
 }
 
 func (infra Infra) decodeKeyPairs(kind string, pairs *api.KVPairs, out chan Event, idx uint64) {
-	logger.Errorf("Key Pair Length: %d", len(*pairs))
+
 	for _, val := range *pairs {
 
 		if idx > val.ModifyIndex {
@@ -253,9 +313,11 @@ func (infra Infra) decodeKeyPairs(kind string, pairs *api.KVPairs, out chan Even
 		}
 
 		event := Event{
-			Type:  kind,
-			Key:   val.Key,
-			Value: string(val.Value),
+			Type: kind,
+			KV: &KeyPair{
+				Key:   val.Key,
+				Value: string(val.Value),
+			},
 		}
 		out <- event
 
@@ -270,9 +332,11 @@ func (infra Infra) decodeKey(kind string, keys []*api.KVPair, out chan Event, id
 		}
 
 		event := Event{
-			Type:  kind,
-			Key:   val.Key,
-			Value: string(val.Value),
+			Type: kind,
+			KV: &KeyPair{
+				Key:   val.Key,
+				Value: string(val.Value),
+			},
 		}
 		out <- event
 	}
@@ -282,13 +346,20 @@ func (infra Infra) decodeService(kind string, services []*api.ServiceEntry, out 
 	for _, val := range services {
 
 		event := Event{
-			Type:        kind,
-			Tags:        val.Service.Tags,
-			ServiceName: val.Service.Service,
-			ServiceID:   val.Service.ID,
-			Node:        val.Node.Node,
-			Address:     val.Service.Address,
-			Port:        val.Service.Port,
+			Type: kind,
+			Service: &ServiceEvent{
+				Tags: val.Service.Tags,
+				Name: val.Service.Service,
+				ID:   val.Service.ID,
+				Node: NodeEvent{
+					ID:              val.Node.Node,
+					Address:         val.Node.Address,
+					TaggedAddresses: val.Node.TaggedAddresses,
+				},
+				Address:           val.Service.Address,
+				Port:              val.Service.Port,
+				EnableTagOverride: val.Service.EnableTagOverride,
+			},
 		}
 		out <- event
 	}
@@ -298,10 +369,32 @@ func (infra Infra) decodeNode(kind string, nodes []*api.Node, out chan Event) {
 	for _, val := range nodes {
 
 		event := Event{
-			Type:          kind,
-			Address:       val.Address,
-			Node:          val.Node,
-			TaggedAddress: val.TaggedAddresses,
+			Type: kind,
+			Node: &NodeEvent{
+				ID:              val.Node,
+				Address:         val.Address,
+				TaggedAddresses: val.TaggedAddresses,
+			},
+		}
+		out <- event
+	}
+}
+
+func (infra Infra) decodeEvent(kind string, nodes []*api.UserEvent, out chan Event) {
+	for _, val := range nodes {
+
+		event := Event{
+			Type: kind,
+			UserEvent: &UserEvent{
+				ID:            val.ID,
+				Name:          val.Name,
+				Payload:       val.Payload,
+				NodeFilter:    val.NodeFilter,
+				ServiceFilter: val.ServiceFilter,
+				TagFilter:     val.TagFilter,
+				Version:       val.Version,
+				LTime:         val.LTime,
+			},
 		}
 		out <- event
 	}
@@ -319,7 +412,7 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 			return
 		}
 
-		logger.Errorf("Handler...%s, Index: %d", kind, idx)
+		logger.Infof("Handler...%s, Index: %d", kind, idx)
 
 		switch kind {
 		case "check":
@@ -330,28 +423,33 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 			}
 		case "keyprefix":
 			if v, ok := raw.(api.KVPairs); ok && len(v) > 0 {
-				logger.Errorf("Got Key Pairs")
 				infra.decodeKeyPairs("keyprefix", &v, out, idx)
 			} else {
-				logger.Errorf("Error in check watch: %#v", raw)
+				logger.Errorf("Error in keyprefix watch: %#v", raw)
 			}
 		case "service":
 			if v, ok := raw.([]*api.ServiceEntry); ok && len(v) > 0 {
 				infra.decodeService("service", v, out)
 			} else {
-				logger.Errorf("Error in check watch: %#v", raw)
+				logger.Errorf("Error in service watch: %#v", raw)
 			}
 		case "nodes":
 			if v, ok := raw.([]*api.Node); ok && len(v) > 0 {
 				infra.decodeNode("nodes", v, out)
 			} else {
-				logger.Errorf("Error in check watch: %#v", raw)
+				logger.Errorf("Error in node watch: %#v", raw)
 			}
 		case "key":
 			if v, ok := raw.([]*api.KVPair); ok && len(v) > 0 {
 				infra.decodeKey("key", v, out, idx)
 			} else {
-				logger.Errorf("Error in check watch: %#v", raw)
+				logger.Errorf("Error in key watch: %#v", raw)
+			}
+		case "event":
+			if v, ok := raw.([]*api.UserEvent); ok && len(v) > 0 {
+				infra.decodeEvent("event", v, out)
+			} else {
+				logger.Errorf("Error in event watch: %#v", raw)
 			}
 		}
 	}
@@ -388,5 +486,35 @@ func (infra Infra) WatchKeys(prefix string, done <-chan bool) <-chan Event {
 	return infra.doWatch(map[string]interface{}{
 		"type":   "keyprefix",
 		"prefix": prefix,
+	}, done)
+}
+
+// WatchService - Watch a particular service.
+func (infra Infra) WatchService(service string, done <-chan bool) <-chan Event {
+	return infra.doWatch(map[string]interface{}{
+		"type":    "service",
+		"service": service,
+	}, done)
+}
+
+// WatchServices - Watch all services.
+func (infra Infra) WatchServices(done <-chan bool) <-chan Event {
+	return infra.doWatch(map[string]interface{}{
+		"type": "services",
+	}, done)
+}
+
+// WatchNodes - Watch all services.
+func (infra Infra) WatchNodes(done <-chan bool) <-chan Event {
+	return infra.doWatch(map[string]interface{}{
+		"type": "nodes",
+	}, done)
+}
+
+// WatchEvent - Watch all events of a certain type..
+func (infra Infra) WatchEvent(name string, done <-chan bool) <-chan Event {
+	return infra.doWatch(map[string]interface{}{
+		"type": "event",
+		"name": name,
 	}, done)
 }

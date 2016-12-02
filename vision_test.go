@@ -133,7 +133,7 @@ func TestNodes(t *testing.T) {
 
 }
 
-func TestWatch(t *testing.T) {
+func TestWatchPrefix(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode.")
 	}
@@ -148,18 +148,52 @@ func TestWatch(t *testing.T) {
 
 	infra.SetValue("foo/bar", "bar1")
 	time.Sleep(20 * time.Millisecond)
-	if event := <-events; event.Value != "bar1" {
-		t.Fatalf("Event equals: %s", event.Value)
+	if event := <-events; event.KV.Value != "bar1" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
 	}
 	infra.SetValue("foo/bat", "bar2")
 	time.Sleep(20 * time.Millisecond)
-	if event := <-events; event.Value != "bar2" {
-		t.Fatalf("Event equals: %s", event.Value)
+	if event := <-events; event.KV.Value != "bar2" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
 	}
 	infra.SetValue("foo/bas", "bar3")
 	time.Sleep(20 * time.Millisecond)
-	if event := <-events; event.Value != "bar3" {
-		t.Fatalf("Event equals: %s", event.Value)
+	if event := <-events; event.KV.Value != "bar3" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
+	}
+
+	done <- true
+}
+
+func TestWatchEvent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
+
+	infra, err := NewInfra("local")
+	if err != nil {
+		t.Fatalf("Could not connect to Consul.")
+	}
+	done := make(chan bool, 1)
+
+	events := infra.WatchEvent("node-456-logs", done)
+
+	infra.FireEvent(&UserEvent{Name: "node-456-logs", Payload: []byte("1")})
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; string(event.UserEvent.Payload) != "1" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
+	}
+
+	infra.FireEvent(&UserEvent{Name: "node-456-logs", Payload: []byte("2")})
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; string(event.UserEvent.Payload) != "2" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
+	}
+
+	infra.FireEvent(&UserEvent{Name: "node-456-logs", Payload: []byte("3")})
+	time.Sleep(20 * time.Millisecond)
+	if event := <-events; string(event.UserEvent.Payload) != "3" {
+		t.Fatalf("Event equals: %s", event.KV.Value)
 	}
 
 	done <- true
