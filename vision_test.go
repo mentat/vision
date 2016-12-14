@@ -198,3 +198,27 @@ func TestWatchEvent(t *testing.T) {
 
 	done <- true
 }
+
+// Not currently working for some reason...
+func testCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
+
+	infra, err := NewInfra("local")
+	if err != nil {
+		t.Fatalf("Could not connect to Consul.")
+	}
+	done := make(chan bool, 1)
+
+	checks := infra.WatchChecks("mongo", done)
+
+	infra.testRegisterService("foobar", "1.1.1.1", "foobar")
+	infra.testDeregisterService("foobar", "1.1.1.1")
+
+	if check := <-checks; string(check.Check.Status) != "3" {
+		t.Fatalf("Check status equals: %s", check.Check.Status)
+	}
+
+	done <- true
+}

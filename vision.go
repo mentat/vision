@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/consul/api"
+	"github.com/hashicorp/consul/consul/structs"
 	"github.com/hashicorp/consul/watch"
 	"github.com/juju/loggo"
 )
@@ -110,7 +111,7 @@ type Infra struct {
 
 // NewInfra -
 func NewInfra(region string) (*Infra, error) {
-
+	logger.SetLogLevel(loggo.TRACE)
 	config := api.DefaultConfig()
 	client, err := api.NewClient(config)
 	if err != nil {
@@ -184,6 +185,46 @@ func (infra Infra) GetNode(nodeID string) (*Node, error) {
 	}
 
 	return ret, nil
+}
+
+func (infra Infra) testRegisterService(name, address, nodeID string) error {
+
+	catalog := infra.consulClient.Catalog()
+
+	reg := &api.CatalogRegistration{
+		Node:       name,
+		Address:    address,
+		Datacenter: infra.Region,
+		Service: &api.AgentService{
+			ID:      name,
+			Service: name,
+		},
+		Check: &api.AgentCheck{
+			Node:      nodeID,
+			CheckID:   name,
+			Name:      name,
+			Status:    structs.HealthPassing,
+			ServiceID: name,
+		},
+	}
+	_, err := catalog.Register(reg, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (infra Infra) testDeregisterService(name, address string) error {
+	catalog := infra.consulClient.Catalog()
+
+	dereg := &api.CatalogDeregistration{
+		Node:       name,
+		Address:    address,
+		Datacenter: infra.Region,
+	}
+
+	catalog.Deregister(dereg, nil)
+	return nil
 }
 
 // FireEvent - fire a custom event into the cluster.
@@ -415,7 +456,7 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 		logger.Infof("Handler...%s, Index: %d", kind, idx)
 
 		switch kind {
-		case "check":
+		case "checks":
 			if v, ok := raw.([]*api.HealthCheck); ok && len(v) > 0 {
 				infra.decodeCheck("check", v, out, idx)
 			} else {
@@ -476,8 +517,16 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 // WatchChecks - Watch the health checks for a particular service.
 func (infra Infra) WatchChecks(service string, done <-chan bool) <-chan Event {
 	return infra.doWatch(map[string]interface{}{
-		"type":    "check",
+		"type":    "checks",
 		"service": service,
+	}, done)
+}
+
+// WatchCheckState - Watch the health checks for a state: ie, warning
+func (infra Infra) WatchCheckState(state string, done <-chan bool) <-chan Event {
+	return infra.doWatch(map[string]interface{}{
+		"type":  "checks",
+		"state": state,
 	}, done)
 }
 
