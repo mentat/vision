@@ -143,7 +143,7 @@ func (infra Infra) getConsulServers() ([]*consulServer, error) {
 	return nil, nil
 }
 
-// GetNodes -
+// GetNodesOfService -
 func (infra Infra) GetNodesOfService(name string) ([]*Node, error) {
 
 	return nil, nil
@@ -501,11 +501,11 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 		for {
 			select {
 			case <-done:
-				logger.Errorf("Stopping...")
+				logger.Warningf("Stopping plan...")
 				plan.Stop()
 				return
 			default:
-				logger.Errorf("Running...")
+				logger.Infof("Running plan...")
 				plan.Run(infra.consulConfig.Address)
 			}
 		}
@@ -522,7 +522,7 @@ func (infra Infra) WatchChecks(service string, done <-chan bool) <-chan Event {
 	}, done)
 }
 
-// WatchCheckState - Watch the health checks for a state: ie, warning
+// WatchCheckState - Watch the health checks for a state: ie, any, passing, warning, or critical
 func (infra Infra) WatchCheckState(state string, done <-chan bool) <-chan Event {
 	return infra.doWatch(map[string]interface{}{
 		"type":  "checks",
