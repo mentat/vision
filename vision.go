@@ -112,8 +112,10 @@ type Infra struct {
 // NewInfra -
 func NewInfra(region string) (*Infra, error) {
 	logger.SetLogLevel(loggo.TRACE)
+
 	config := api.DefaultConfig()
 	client, err := api.NewClient(config)
+
 	if err != nil {
 		return nil, err
 	}
