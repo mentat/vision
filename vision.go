@@ -48,6 +48,11 @@ type NodeEvent struct {
 	ID              string
 	Address         string
 	TaggedAddresses map[string]string
+	Meta            map[string]string
+}
+
+func (n NodeEvent) String() string {
+	return fmt.Sprintf("ID:%s Address:%s", n.ID, n.Address)
 }
 
 // CheckEvent - a health check event.
@@ -470,7 +475,7 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 			} else {
 				logger.Errorf("Error in keyprefix watch: %#v", raw)
 			}
-		case "service":
+		case "services":
 			if v, ok := raw.([]*api.ServiceEntry); ok && len(v) > 0 {
 				infra.decodeService("service", v, out)
 			} else {
