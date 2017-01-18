@@ -490,7 +490,9 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 			if v, ok := raw.([]*api.HealthCheck); ok && len(v) > 0 {
 				infra.decodeCheck("check", v, out, idx)
 			} else {
-				logger.Errorf("Error in check watch: %#v", raw)
+				if !ok {
+					logger.Errorf("Error in check watch: %#v", raw)
+				}
 			}
 		case "keyprefix":
 			if v, ok := raw.(api.KVPairs); ok && len(v) > 0 {
