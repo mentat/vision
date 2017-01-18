@@ -243,6 +243,7 @@ func (infra Infra) decodeCheck(kind string, checks []*api.HealthCheck, out chan 
 		event := Event{
 			Type: kind,
 			Check: &CheckEvent{
+				Name:        val.Name,
 				Status:      val.Status,
 				ServiceName: val.ServiceName,
 				ServiceID:   val.ServiceID,
