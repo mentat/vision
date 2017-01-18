@@ -67,6 +67,11 @@ type CheckEvent struct {
 	ServiceName string
 }
 
+func (e CheckEvent) String() string {
+	return fmt.Sprintf("Node: %s, CheckID: %s, Name: %s, Status: %s, Notes: %s, Service:%s",
+		e.Node, e.CheckID, e.Name, e.Status, e.Notes, e.ServiceID)
+}
+
 // ServiceEvent - A Service Event.
 type ServiceEvent struct {
 	ID                string
@@ -76,6 +81,11 @@ type ServiceEvent struct {
 	Address           string
 	EnableTagOverride bool
 	Node              NodeEvent
+}
+
+func (e ServiceEvent) String() string {
+	return fmt.Sprintf("ID: %s, Name: %s, Tags: %s, Port: %d, Address: %s, Node:%+v",
+		e.ID, e.Name, e.Tags, e.Port, e.Address, e.Node)
 }
 
 // UserEvent - A custom event type.
@@ -413,6 +423,19 @@ func (infra Infra) decodeService(kind string, services []*api.ServiceEntry, out 
 	}
 }
 
+func (infra Infra) decodeServices(kind string, services map[string][]string, out chan Event) {
+	for k, _ := range services {
+
+		event := Event{
+			Type: kind,
+			Service: &ServiceEvent{
+				Name: k,
+			},
+		}
+		out <- event
+	}
+}
+
 func (infra Infra) decodeNode(kind string, nodes []*api.Node, out chan Event) {
 	for _, val := range nodes {
 
@@ -476,10 +499,16 @@ func (infra Infra) doWatch(details map[string]interface{}, done <-chan bool) <-c
 				logger.Errorf("Error in keyprefix watch: %#v", raw)
 			}
 		case "services":
+			if v, ok := raw.(map[string][]string); ok && len(v) > 0 {
+				infra.decodeServices("services", v, out)
+			} else {
+				logger.Errorf("Error in services watch: %#v", raw)
+			}
+		case "service":
 			if v, ok := raw.([]*api.ServiceEntry); ok && len(v) > 0 {
 				infra.decodeService("service", v, out)
 			} else {
-				logger.Errorf("Error in service watch: %#v", raw)
+				logger.Errorf("Error in services watch: %#v", raw)
 			}
 		case "nodes":
 			if v, ok := raw.([]*api.Node); ok && len(v) > 0 {
